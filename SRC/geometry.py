@@ -16,7 +16,7 @@ import numpy as np
 
 # Import Internal functions/variables
 # ----------------------------------------------------------------------
-from COMMON import GnssConstants as const
+from COMMON.GnssConstants import ECCENTRICITY, EARTH_RADIUS, IONO_HEIGHT
 
 
 def skew_symmetric(vec):
@@ -49,11 +49,35 @@ def euler_to_rotmat(eul):
     return C
 
 
+def ecef_to_ned(receiver_state):
+    """
+    Compute the ECEF to NED (North, East, Down) transformation matrix.
+    Args:
+        receiver_state (dict): Receiver state containing position and orientation information
+    Returns:
+        C_e_n (np.ndarray): 3x3 transformation matrix from ECEF to NED
+    """
+    longitude = np.deg2rad(receiver_state["Longitude(deg)"])
+    latitude = np.deg2rad(receiver_state["Latitude(deg)"])
+
+    sin_lat = np.sin(latitude)
+    cos_lat = np.cos(latitude)
+    sin_long = np.sin(longitude)
+    cos_long = np.cos(longitude)
+
+    # ECEF to NED transformation matrix
+    C_e_n = np.array([
+        [-sin_lat * cos_long, -sin_lat * sin_long, cos_lat],
+        [-sin_long,           cos_long,           0],
+        [-cos_lat * cos_long, -cos_lat * sin_long, -sin_lat]
+    ])
+
+    return C_e_n
+
+
 def ned_to_ecef(receiver_state, true_R):
 
     # Parameters
-    R_0 = const.EARTH_RADIUS  # WGS84 Equatorial radius in meters
-    e = 0.0818191908425  # WGS84 eccentricity
 
     longitude = np.deg2rad(receiver_state["Longitude(deg)"])
     latitude = np.deg2rad(receiver_state["Latitude(deg)"])
@@ -62,10 +86,13 @@ def ned_to_ecef(receiver_state, true_R):
     east_vel = receiver_state["EastVel(m/s)"]
     down_vel = receiver_state["DownVel(m/s)"]
 
+    # v: indica que es un vector de velocidad.
+    # eb: significa "Earth to Body" (de la Tierra al cuerpo), pero en este contexto específico, se refiere al movimiento del cuerpo (por ejemplo, un receptor GPS) respecto a la Tierra.
+    # n: indica que el vector está expresado en el sistema de coordenadas NED (North-East-Down).
     v_eb_n = np.array((north_vel, east_vel, down_vel))
 
     # Calculate transverse radius of curvature
-    R_E = R_0 / np.sqrt(1 - (e * np.sin(latitude))**2)
+    R_E = EARTH_RADIUS / np.sqrt(1 - (ECCENTRICITY * np.sin(latitude))**2)
 
     # Convert position
     cos_lat = np.cos(latitude)
@@ -76,7 +103,7 @@ def ned_to_ecef(receiver_state, true_R):
     r_eb_e = np.array([
         (R_E + height) * cos_lat * cos_long,
         (R_E + height) * cos_lat * sin_long,
-        ((1 - e**2) * R_E + height) * sin_lat
+        ((1 - ECCENTRICITY**2) * R_E + height) * sin_lat
     ])
 
     # Calculate ECEF to NED coordinate transformation matrix
@@ -97,15 +124,13 @@ def ned_to_ecef(receiver_state, true_R):
 
 def pv_ecef_to_geodetics(r_eb_e, v_eb_e):
     # Parameters
-    R_0 = const.EARTH_RADIUS  # WGS84 Equatorial radius in meters
-    e = 0.0818191908425  # WGS84 eccentricity
 
     # Convert position using Borkowski closed-form exact solution
     longitude = np.arctan2(r_eb_e[1], r_eb_e[0])
 
     # Calculate auxiliary values for Borkowski's solution
-    k1 = np.sqrt(1 - e**2) * abs(r_eb_e[2])
-    k2 = e**2 * R_0
+    k1 = np.sqrt(1 - ECCENTRICITY**2) * abs(r_eb_e[2])
+    k2 = ECCENTRICITY**2 * EARTH_RADIUS
     beta = np.sqrt(r_eb_e[0]**2 + r_eb_e[1]**2)
     E = (k1 - k2) / beta
     F = (k1 + k2) / beta
@@ -121,11 +146,11 @@ def pv_ecef_to_geodetics(r_eb_e, v_eb_e):
     T = np.sqrt(G**2 + (F - V * G) / (2 * G - E)) - G
 
     latitude = np.sign(r_eb_e[2]) * \
-        np.arctan((1 - T**2) / (2 * T * np.sqrt(1 - e**2)))
+        np.arctan((1 - T**2) / (2 * T * np.sqrt(1 - ECCENTRICITY**2)))
 
-    height = (beta - R_0 * T) * np.cos(latitude) + \
-        (r_eb_e[2] - np.sign(r_eb_e[2]) * R_0 *
-         np.sqrt(1 - e**2)) * np.sin(latitude)
+    height = (beta - EARTH_RADIUS * T) * np.cos(latitude) + \
+        (r_eb_e[2] - np.sign(r_eb_e[2]) * EARTH_RADIUS *
+         np.sqrt(1 - ECCENTRICITY**2)) * np.sin(latitude)
 
     # Calculate ECEF to NED coordinate transformation matrix
     cos_lat = np.cos(latitude)
@@ -145,14 +170,37 @@ def pv_ecef_to_geodetics(r_eb_e, v_eb_e):
     return latitude, longitude, height, v_eb_n
 
 
-def radii_of_curvature(latitude):
-    R_0 = 6378137  # WGS84 Equatorial radius in meters
-    e = 0.0818191908425  # WGS84 eccentricity
+# def geodetics_to_pv_ecef(latitude, longitude, height, v_eb_n):
+    # TODO: check if it's correct
+    # Convert geodetic coordinates to ECEF
+    latitude = np.deg2rad(latitude)
+    longitude = np.deg2rad(longitude)
 
-    R_N = R_0 * (1 - e**2) / (1 - (e * np.sin(latitude))
-                              ** 2)**1.5  # Meridian radius of curvature
+    # Compute ECEF position
+    N = EARTH_RADIUS / np.sqrt(1 - (ECCENTRICITY * np.sin(latitude))**2)
+    x = (N + height) * np.cos(latitude) * np.cos(longitude)
+    y = (N + height) * np.cos(latitude) * np.sin(longitude)
+    z = (N * (1 - ECCENTRICITY**2) + height) * np.sin(latitude)
+
+    r_eb_e = np.array([x, y, z])
+
+    # Compute ECEF velocity
+    R_N, R_E = radio_of_curvature(latitude)
+    v_eb_e = np.array([
+        v_eb_n[0] * (R_N + height),
+        v_eb_n[1] * (R_E + height) * np.cos(latitude),
+        -v_eb_n[2]
+    ])
+
+    return r_eb_e, v_eb_e
+
+
+def radio_of_curvature(latitude):
+
+    R_N = EARTH_RADIUS * (1 - ECCENTRICITY**2) / (1 - (ECCENTRICITY * np.sin(latitude))
+                                                  ** 2)**1.5  # Meridian radius of curvature
     # Transverse radius of curvature
-    R_E = R_0 / np.sqrt(1 - (e * np.sin(latitude))**2)
+    R_E = EARTH_RADIUS / np.sqrt(1 - (ECCENTRICITY * np.sin(latitude))**2)
 
     return R_N, R_E
 
@@ -178,7 +226,7 @@ def compute_ned_errors(gnss_pvt, true_traj):
         (np.rad2deg(est_latitude), np.rad2deg(est_longitude), est_height))
 
     # Position error calculation
-    R_N, R_E = radii_of_curvature(true_latitude)
+    R_N, R_E = radio_of_curvature(true_latitude)
     delta_r_eb_n = np.zeros(3)
     delta_r_eb_n[0] = (est_latitude - true_latitude) * (R_N + true_height)
     delta_r_eb_n[1] = (est_longitude - true_longitude) * \
@@ -204,8 +252,6 @@ def compute_tropo_mpp_rad(Elev):
 
 
 def compute_iono_mpp_rad(ElevRad):
-    EARTH_RADIUS = 6378136.3
-    IONO_HEIGHT = 350000.0
 
     Fpp = (1.0-((EARTH_RADIUS * np.cos(ElevRad)) /
                 (EARTH_RADIUS + IONO_HEIGHT))**2)**(-0.5)

@@ -25,13 +25,13 @@ import numpy as np
 # ----------------------------------------------------------------------
 from input_output import read_conf, read_traj_data, read_sp3, read_apo
 from input_output import create_output_file
-# from gnss_simulator import simulate_gnss_corrected_meas
-# from geometry import euler_to_rotmat, ned_to_ecef
+from gnss_simulator import simulate_gnss_corrected_meas
+from geometry import euler_to_rotmat, ned_to_ecef
 # from gnss_positioning import estimate_gnss_position_lsq
 # from geometry import compute_ned_errors
-# from gnss_out import pos_hdr, los_hdr
+from gnss_out import pos_hdr, los_hdr
 # from gnss_out import write_gnss_pos, plot_gnss_pos
-# from gnss_out import write_gnss_los, plot_gnss_los
+from gnss_out import write_gnss_los, plot_gnss_los
 
 # ----------------------------------------------------------------------
 # INTERNAL FUNCTIONS
@@ -42,10 +42,10 @@ def display_usage():
     sys.stderr.write(
         "ERROR: Please provide path to SCENARIO as a unique argument\n")
 
+
 #######################################################
 # MAIN BODY
 #######################################################
-
 
 # Print header
 print('------------------------------------')
@@ -62,14 +62,12 @@ scen = sys.argv[1]
 
 # Read conf
 ###############
-# Select the Configuratiun file name
+# Select the Configuration file name
 cfg_file = scen + '/CFG/senfus.cfg'
-# TODO [CFG]: Read configuration file including all the necessary parameters for the correct Measurement Simulation
 
 # Read conf file
 # start here..., remove the following line and add a line to read the conf file:
-print("Start coding at senfus.py: line 65...")
-sys.exit()
+conf = read_conf(cfg_file)
 
 # Read input files
 #####################
@@ -78,24 +76,23 @@ sys.exit()
 # Get trajectory data file path
 
 traj_path = scen + '/INP/RCVR/' + conf["RCVR_TRAJ"]
-
-# TODO [INPUT]: Read trajectory file
-
-
-# Read satellite orbits
-# ------------------------
-# Get SP3 data file path
-sp3_path = scen + '/INP/SP3/' + conf["SP3_FILE"]
-
-# TODO [INPUT]: Read SP3 file
+true_traj = read_traj_data(traj_path)
 
 
 # Read satellite APOs
 # ------------------------
 # Get APO data file path
 apo_path = scen + '/INP/ATX/' + conf["APO_FILE"]
+apo_data = read_apo(apo_path)
 
-# TODO [INPUT]: Read APO file
+# Read satellite orbits
+# ------------------------
+# Get SP3 data file path
+sp3_path = scen + '/INP/SP3/' + conf["SP3_FILE"]
+sp3_data = read_sp3(sp3_path)
+
+
+# sys.exit()
 
 
 # Open output files
@@ -129,8 +126,7 @@ for index, receiver_state in true_traj.iterrows():
 
         if conf['GNSS_OUT']:
             # output line of sight information
-            write_gnss_los(gnss_los_file, sod, len(
-                gnss_corrected_meas), los_info)
+            write_gnss_los(gnss_los_file, len(gnss_corrected_meas), los_info)
 
             # [CHALLENGE] Estimate the Position Errors
             # ---------------------------------------
