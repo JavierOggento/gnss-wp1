@@ -70,23 +70,6 @@ def interpolate_sp3(current_sat_ephemeris, receiver_time):
     y_points = sp3_rows['Y'].values
     z_points = sp3_rows['Z'].values
 
-    def barycentric_interpolate(points, sod_points, receiver_time):
-        n = len(points)
-        weights = np.ones(n)
-        for j in range(n):
-            for k in range(n):
-                if j != k:
-                    weights[j] /= (sod_points[j] - sod_points[k])
-        numerator = 0.0
-        denominator = 0.0
-        for j in range(n):
-            if receiver_time == sod_points[j]:
-                return points[j]
-            term = weights[j] / (receiver_time - sod_points[j])
-            numerator += term * points[j]
-            denominator += term
-        return numerator / denominator
-
     def lagrange_interpolate(points, sod_points, receiver_time):
         result = 0.0
         n = len(points)
@@ -98,10 +81,6 @@ def interpolate_sp3(current_sat_ephemeris, receiver_time):
                           sod_points[j]) / (sod_points[i] - sod_points[j])
             result += L * points[i]
         return result
-
-    # interpolated_x2 = barycentric_interpolate( x_points, sod_points, receiver_time)
-    # interpolated_y2 = barycentric_interpolate( y_points, sod_points, receiver_time)
-    # interpolated_z2 = barycentric_interpolate( z_points, sod_points, receiver_time)
 
     interpolated_x = lagrange_interpolate(x_points, sod_points, receiver_time)
     interpolated_y = lagrange_interpolate(y_points, sod_points, receiver_time)
@@ -129,6 +108,7 @@ def propagate_orbits(conf, receiver_info, sp3_data, apo_data):
     sats_vel = []
 
     receiver_p = receiver_ecef[0]
+    # print("receiver_p:", receiver_p)
 
     # satellites = sp3_data["satellites"]
     # ephemeris = sp3_data["ephemeris"]
@@ -141,38 +121,33 @@ def propagate_orbits(conf, receiver_info, sp3_data, apo_data):
 
     for satellite_label in satellites:
         current_sat_ephemeris = sp3_data.get_group(satellite_label)
+        # print("")
         # print("satellite_label:", satellite_label)
         estimated_transmission_time = receiver_time
 
-        # current_interpolated_position = interpolate_sp3(
-        #     current_sat_ephemeris, receiver_time)
-        # current_geometric_range = np.linalg.norm(
-        #     current_interpolated_position - receiver_p)
-        # current_transmission_time = receiver_time - \
-        #     (current_geometric_range / SPEED_OF_LIGHT)
-
-        # transmission_time = receiver_time - np.abs(np.linalg.norm(receiver_p - interpolated_position) / SPEED_OF_LIGHT)
-
-        # print("interpolated_position:", interpolated_position)
-        # print("transmission_time:", transmission_time)
-
+        # Interpolate the position of the satellite from SP3 data at Reception Time
         # Compute initial estimate of transmissionTime using Geometrical Range
+
         for index in range(max_iterations):
             # print("Iteration:", index)
             # print("Estimated transmission_time:", estimated_transmission_time)
 
             # Interpolate satellite position at estimated transmissionTime
             current_interpolated_position = interpolate_sp3(
-                current_sat_ephemeris, estimated_transmission_time)
+                current_sat_ephemeris, estimated_transmission_time) * 1000
+            # current_sat_ephemeris, estimated_transmission_time)
+
+            # print("current_position:", current_interpolated_position)
 
             current_geometric_range = np.linalg.norm(
                 current_interpolated_position - receiver_p)
+
+            # print("current_geometric_range:", current_geometric_range)
 
             current_transmission_time = receiver_time - \
                 (current_geometric_range / SPEED_OF_LIGHT)
 
             # print("interpolated transmission_time:", current_transmission_time)
-            # print("transmission_time difference:", abs(current_transmission_time - estimated_transmission_time))
 
             # If convergence condition is met:
             if abs(current_transmission_time - estimated_transmission_time) < tolerance:
@@ -190,8 +165,11 @@ def propagate_orbits(conf, receiver_info, sp3_data, apo_data):
         k = current_interpolated_position / \
             np.linalg.norm(current_interpolated_position)
         # print("increment: ", apo_data[satellite_label] * k)
-        final_estimated_position = current_interpolated_position + \
-            apo_data[satellite_label] * k
+
+        apo_correction = apo_data[satellite_label] * k
+
+        # final_estimated_position = current_interpolated_position + apo_correction
+        final_estimated_position = current_interpolated_position - apo_correction
 
         # print("final_estimated_position:", final_estimated_position)
 
@@ -201,11 +179,11 @@ def propagate_orbits(conf, receiver_info, sp3_data, apo_data):
         #     Estimate satellite velocity at transmissionTime
         estimated_velocity = estimate_velocity(
             current_sat_ephemeris, estimated_transmission_time)
+
         # print("estimated_velocity:", estimated_velocity)
-        #     Store estimated velocity in satsVel
+
         sats_vel.append(estimated_velocity)
 
-        #     Add satelliteLabel to satList
         sats_list.append(satellite_label)
     return sats_list, sats_pos, sats_vel
 
@@ -384,48 +362,19 @@ def calculate_elevation(ned_pos):
     return elevation_deg
 
 
-def compute_range_and_rate(r_sat_ecef, r_rec_ecef, v_sat_ecef, v_rec_ecef):
-    """
-    Computes the Sagnac-corrected range and range rate using Earth's rotation matrix
-    defined via the skew-symmetric matrix of Earth's rotation vector.
-
-    Args:
-        r_sat_ecef (np.array): Satellite position vector in ECEF frame (3x1 array).
-        r_rec_ecef (np.array): Receiver position vector in ECEF frame (3x1 array).
-        v_sat_ecef (np.array): Satellite velocity vector in ECEF frame (3x1 array).
-        v_rec_ecef (np.array): Receiver velocity vector in ECEF frame (3x1 array).
-
-    Returns:
-        tuple: (corrected_range, corrected_range_rate)
-    """
-    # Constants
-    c = SPEED_OF_LIGHT
+def get_rotation_matrix(r_sat_ecef, r_rec_ecef):
 
     # Compute time of signal flight (approximate)
     delta_r = r_sat_ecef - r_rec_ecef
     rho_geom = np.linalg.norm(delta_r)
-    tau = rho_geom / c
+    tau = rho_geom / SPEED_OF_LIGHT
 
     # Earth's rotation vector and skew-symmetric matrix
     e_r = skew_symmetric(np.array([0, 0, EARTH_ROTATION_RATE]))
 
     # Earth rotation matrix using matrix exponential
-    # For small tau, use Rodrigues' formula: R = I + e_r * tau
     e_r_tau = e_r * tau
-    R = np.eye(3) + e_r_tau + 0.5 * (e_r_tau @ e_r_tau)
-
-    # Rotate satellite position back to transmission time
-    r_sat_rot = R @ r_sat_ecef
-
-    # Recompute geometric range with rotated satellite position
-    delta_r_corr = r_sat_rot - r_rec_ecef
-    range = np.linalg.norm(delta_r_corr)
-
-    # Range rate calculation (approximate, neglecting rotation effect on velocity)
-    delta_v = v_sat_ecef - v_rec_ecef
-    range_rate = np.dot(delta_r_corr, delta_v) / range
-
-    return range, range_rate
+    return e_r_tau
 
 
 def generateGnssMeasurements(conf, time_delta, sats_info, receiver_info):
@@ -440,11 +389,6 @@ def generateGnssMeasurements(conf, time_delta, sats_info, receiver_info):
     #   Compute ECEF to NED (North, East, Down) transformation matrix
     C_e_n = ecef_to_ned(receiver_state)
 
-    #   Initialize measurement counter
-    measurements_count = 0
-
-    # LOS: SAT-VY SAT-VZ    MEASUREMENT  GEOM-RANGE  RANGE-RATE  SIS-ERR  IONO-ERR TROPO-ERR LOCAL-ERR RANGE-ERR
-
     #   For each satellite in satList:
     sats_list, sats_pos, sats_vel = sats_info
 
@@ -452,7 +396,7 @@ def generateGnssMeasurements(conf, time_delta, sats_info, receiver_info):
 
         #       Compute line-of-sight vector and geometric range
         pos = sats_pos[i]
-        vel = sats_vel[i]
+        vel = sats_vel[i] * 1000
 
         los_vector = pos - receiver_ecef[0]
         ned_pos = C_e_n @ (los_vector)
@@ -460,48 +404,42 @@ def generateGnssMeasurements(conf, time_delta, sats_info, receiver_info):
         elevation = calculate_elevation(ned_pos)
         azimuth = np.degrees(np.arctan2(ned_pos[1], ned_pos[0]))
 
-        geometric_range = np.linalg.norm(los_vector)
-
         if elevation > conf['RCVR_MASK']:
-            #           Increment measurement counter
-            measurements_count += 1
 
-            # print("--- Visible Satellite ---> ", satellite)
-            # print("pos:", pos)
-            # print("vel:", vel)
-            # print("elevation:", round(elevation, 3))
-            # print("azimuth (deg):", round(azimuth, 3))
-            # print("geometric_range:", round(geometric_range, 3))
+            pos_with_sagnac_correction = pos - \
+                get_rotation_matrix(pos, receiver_ecef[0]) @ pos
 
-            # Compute range and range rate (applying Sagnac effect correction)
-            range, range_rate = compute_range_and_rate(
-                pos, receiver_ecef[0], vel, receiver_ecef[1])
-            # print("range:", round(range, 3))
-            # print("range_rate:", round(range_rate, 3))
+            vel_with_sagnac_correction = vel - \
+                get_rotation_matrix(pos, receiver_ecef[0]) @ vel
 
-            # Simulate ranging error => ranging_error = simulate_ranging_errors()
+            geometric_range = np.linalg.norm(
+                pos_with_sagnac_correction - receiver_ecef[0])
+
             sis_error, slant_iono_error, slant_tropo_error, local_err, total_ranging_error = simulate_ranging_errors(
                 conf, satellite, elevation)
-            # print("sis_error:", round(sis_error, 3))
-            # print("slant_iono_error:", round(slant_iono_error, 3))
-            # print("slant_tropo_error:", round(slant_tropo_error, 3))
-            # print("local_err:", round(local_err, 3))
-            # print("total_ranging_error:", round(total_ranging_error, 3))
-            #           Compute pseudo-range measurement considering receiver clock bias and errors
-            pseudo_measurement = range + \
+
+            pseudo_measurement = geometric_range + \
                 conf["RCVR_CLK"][0] + total_ranging_error
-            # print("pseudo_measurement:", pseudo_measurement)
-            #           Compute pseudo-range rate measurement with receiver clock drift
-            pseudo_range_rate = range_rate + \
-                conf["RCVR_CLK"][1] + conf['RANGE_RATE_ERR_SIGMA'] * \
+
+            range_rate = np.dot((vel_with_sagnac_correction - receiver_ecef[1]),
+                                (pos_with_sagnac_correction - receiver_ecef[0])) / geometric_range
+
+
+            drift = conf["RCVR_CLK"][1]
+
+            # Draw sample for range rate error using range rate error model
+            range_rate_sigma_error = conf['RANGE_RATE_ERR_SIGMA'] * \
                 np.random.normal(0, 1)
-            # print("pseudo_range_rate:", pseudo_range_rate)
-            #           Store satellite position and velocity in measurement dataset
+
+            range_rate_error = drift + range_rate_sigma_error
+
+            pseudo_range_rate = range_rate + range_rate_error
+
             gnss_measurements.append([
                 pseudo_measurement,
                 pseudo_range_rate,
-                pos,
-                vel,
+                pos_with_sagnac_correction,
+                vel_with_sagnac_correction,
             ])
 
             #           Store line-of-sight information (LOS) in output dataset
@@ -511,12 +449,12 @@ def generateGnssMeasurements(conf, time_delta, sats_info, receiver_info):
                 satellite[1:],
                 elevation,
                 azimuth,
-                pos[0],
-                pos[1],
-                pos[2],
-                vel[0],
-                vel[1],
-                vel[2],
+                pos_with_sagnac_correction[0],
+                pos_with_sagnac_correction[1],
+                pos_with_sagnac_correction[2],
+                vel_with_sagnac_correction[0],
+                vel_with_sagnac_correction[1],
+                vel_with_sagnac_correction[2],
                 pseudo_measurement,
                 geometric_range / 1000,
                 pseudo_range_rate,

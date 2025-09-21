@@ -258,7 +258,7 @@ def read_sp3(file_path):
             if prn.startswith('G') or prn.startswith('E'):
                 x, y, z, _ = map(float, values[1:])
                 ephemeris_data.append(
-                    [current_epoch, prn, x*1000, y*1000, z*1000])
+                    [current_epoch, prn, x, y, z])
 
     positions_df = pd.DataFrame(ephemeris_data, columns=[
                                 'SOD', 'PRN', 'X', 'Y', 'Z',]).groupby('PRN')
