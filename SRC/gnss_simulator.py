@@ -1,4 +1,3 @@
-
 ########################################################################
 # gnss_simulator.py:
 # This is the GNSS Simulation Module of SENFUS tool
@@ -21,7 +20,7 @@ import math
 import sys
 import numpy as np
 import pandas as pd
-from COMMON.GnssConstants import EARTH_RADIUS, SPEED_OF_LIGHT, EARTH_ROTATION_RATE
+from COMMON.gnss_constants import EARTH_RADIUS, SPEED_OF_LIGHT, EARTH_ROTATION_RATE
 from geometry import ecef_to_ned, skew_symmetric
 
 
@@ -71,6 +70,23 @@ def interpolate_sp3(current_sat_ephemeris, receiver_time):
     y_points = sp3_rows['Y'].values
     z_points = sp3_rows['Z'].values
 
+    def barycentric_interpolate(points, sod_points, receiver_time):
+        n = len(points)
+        weights = np.ones(n)
+        for j in range(n):
+            for k in range(n):
+                if j != k:
+                    weights[j] /= (sod_points[j] - sod_points[k])
+        numerator = 0.0
+        denominator = 0.0
+        for j in range(n):
+            if receiver_time == sod_points[j]:
+                return points[j]
+            term = weights[j] / (receiver_time - sod_points[j])
+            numerator += term * points[j]
+            denominator += term
+        return numerator / denominator
+
     def lagrange_interpolate(points, sod_points, receiver_time):
         result = 0.0
         n = len(points)
@@ -83,12 +99,13 @@ def interpolate_sp3(current_sat_ephemeris, receiver_time):
             result += L * points[i]
         return result
 
-    interpolated_x = lagrange_interpolate(
-        x_points, sod_points, receiver_time)
-    interpolated_y = lagrange_interpolate(
-        y_points, sod_points, receiver_time)
-    interpolated_z = lagrange_interpolate(
-        z_points, sod_points, receiver_time)
+    # interpolated_x2 = barycentric_interpolate( x_points, sod_points, receiver_time)
+    # interpolated_y2 = barycentric_interpolate( y_points, sod_points, receiver_time)
+    # interpolated_z2 = barycentric_interpolate( z_points, sod_points, receiver_time)
+
+    interpolated_x = lagrange_interpolate(x_points, sod_points, receiver_time)
+    interpolated_y = lagrange_interpolate(y_points, sod_points, receiver_time)
+    interpolated_z = lagrange_interpolate(z_points, sod_points, receiver_time)
 
     interpolated_position = np.array(
         [interpolated_x, interpolated_y, interpolated_z])
@@ -127,7 +144,12 @@ def propagate_orbits(conf, receiver_info, sp3_data, apo_data):
         # print("satellite_label:", satellite_label)
         estimated_transmission_time = receiver_time
 
-        # interpolated_position = interpolate_sp3( current_sat_ephemeris, receiver_time)
+        # current_interpolated_position = interpolate_sp3(
+        #     current_sat_ephemeris, receiver_time)
+        # current_geometric_range = np.linalg.norm(
+        #     current_interpolated_position - receiver_p)
+        # current_transmission_time = receiver_time - \
+        #     (current_geometric_range / SPEED_OF_LIGHT)
 
         # transmission_time = receiver_time - np.abs(np.linalg.norm(receiver_p - interpolated_position) / SPEED_OF_LIGHT)
 
@@ -141,14 +163,11 @@ def propagate_orbits(conf, receiver_info, sp3_data, apo_data):
 
             # Interpolate satellite position at estimated transmissionTime
             current_interpolated_position = interpolate_sp3(
-                current_sat_ephemeris, estimated_transmission_time)   # in meters
+                current_sat_ephemeris, estimated_transmission_time)
 
-            # 3"interpolated_position:", current_interpolated_position)
-            # Compute geometric range to receiver
             current_geometric_range = np.linalg.norm(
                 current_interpolated_position - receiver_p)
 
-            # Update transmissionTime estimate
             current_transmission_time = receiver_time - \
                 (current_geometric_range / SPEED_OF_LIGHT)
 
@@ -392,7 +411,8 @@ def compute_range_and_rate(r_sat_ecef, r_rec_ecef, v_sat_ecef, v_rec_ecef):
 
     # Earth rotation matrix using matrix exponential
     # For small tau, use Rodrigues' formula: R = I + e_r * tau
-    R = np.eye(3) + e_r * tau
+    e_r_tau = e_r * tau
+    R = np.eye(3) + e_r_tau + 0.5 * (e_r_tau @ e_r_tau)
 
     # Rotate satellite position back to transmission time
     r_sat_rot = R @ r_sat_ecef

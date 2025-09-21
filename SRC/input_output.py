@@ -18,7 +18,7 @@ from collections import OrderedDict
 import pandas as pd
 import numpy as np
 
-from COMMON.GnssConstants import EARTH_RADIUS, ECCENTRICITY
+from COMMON.gnss_constants import EARTH_RADIUS, ECCENTRICITY
 
 # Import Internal functions/variables
 # ----------------------------------------------------------------------
@@ -163,6 +163,11 @@ def read_conf(cfg_file):
                             key, fields, 2, 2, [None, None], [None, None])
                         n_read_params += 1
 
+                    if key == 'GENERATE_LOS_POS_FILES':
+                        conf[key] = check_conf_param(
+                            key, fields, 1, 1, [0], [1])
+                        n_read_params += 1
+
     conf['RCVR_MASK_RAD'] = np.deg2rad(conf['RCVR_MASK'])
 
     np.random.seed(int(conf['SEED']))
@@ -233,19 +238,14 @@ def read_sp3(file_path):
     header = []
     satellites = []
     ephemeris_data = []
-    reading_header = True
-    reading_satellites = False
     reading_ephemeris = False
 
     for line in lines:
         if line.startswith('#'):  # Header lines
             header.append(line.strip())
         elif line.startswith('+'):  # Satellite list
-            reading_satellites = True
             satellites.extend(line[3:].strip().split())
         elif line.startswith('*'):  # Epoch time marker
-            reading_header = False
-            reading_satellites = False
             reading_ephemeris = True
             time_parts = list(map(float, line[2:].split()))
             # Convert to seconds of the day
@@ -256,7 +256,7 @@ def read_sp3(file_path):
             prn = values[0][1:]
             # Only include GPS (G) and Galileo (E)
             if prn.startswith('G') or prn.startswith('E'):
-                x, y, z, clock = map(float, values[1:])
+                x, y, z, _ = map(float, values[1:])
                 ephemeris_data.append(
                     [current_epoch, prn, x*1000, y*1000, z*1000])
 

@@ -16,7 +16,7 @@ import numpy as np
 
 # Import Internal functions/variables
 # ----------------------------------------------------------------------
-from COMMON.GnssConstants import ECCENTRICITY, EARTH_RADIUS, IONO_HEIGHT
+from COMMON.gnss_constants import ECCENTRICITY, EARTH_RADIUS, IONO_HEIGHT
 
 
 def skew_symmetric(vec):

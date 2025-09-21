@@ -95,53 +95,53 @@ sp3_data = read_sp3(sp3_path)
 # sys.exit()
 
 
-# Open output files
-#######################
 gnss_los_file_path = scen + '/OUT/GNSS/los_file.dat'
-gnss_los_file = create_output_file(gnss_los_file_path, los_hdr)
-
 
 # Loop over trajectory records
-for index, receiver_state in true_traj.iterrows():
-    sod = receiver_state["Time(s)"]
-    roll = np.deg2rad(receiver_state["Roll(deg)"])
-    pitch = np.deg2rad(receiver_state["Pitch(deg)"])
-    yaw = np.deg2rad(receiver_state["Yaw(deg)"])
+if conf['GENERATE_LOS_POS_FILES']:
+    # Open output files
+    #######################
+    gnss_los_file = create_output_file(gnss_los_file_path, los_hdr)
 
-    # Transform Euler angles to Rotation Matrix
-    true_R = euler_to_rotmat((roll, pitch, yaw))
+    for index, receiver_state in true_traj.iterrows():
+        sod = receiver_state["Time(s)"]
+        roll = np.deg2rad(receiver_state["Roll(deg)"])
+        pitch = np.deg2rad(receiver_state["Pitch(deg)"])
+        yaw = np.deg2rad(receiver_state["Yaw(deg)"])
 
-    # Get ECEF position, velocity and attitude
-    receiver_ecef = ned_to_ecef(receiver_state, true_R)
+        # Transform Euler angles to Rotation Matrix
+        true_R = euler_to_rotmat((roll, pitch, yaw))
 
-    if sod % conf["GNSS_RATE"] == 0.0:
-        # Simulate GNSS corrected Measurements
-        # ---------------------------------------
-        gnss_corrected_meas, los_info = simulate_gnss_corrected_meas(
-            conf, receiver_state, receiver_ecef, sp3_data, apo_data)
+        # Get ECEF position, velocity and attitude
+        receiver_ecef = ned_to_ecef(receiver_state, true_R)
 
-        # [CHALLENGE] Estimate the GNSS-only position
-        # ---------------------------------------
-        # gnss_pvt = estimate_gnss_position_lsq(gnss_corrected_meas)
-
-        if conf['GNSS_OUT']:
-            # output line of sight information
-            write_gnss_los(gnss_los_file, len(gnss_corrected_meas), los_info)
-
-            # [CHALLENGE] Estimate the Position Errors
+        if sod % conf["GNSS_RATE"] == 0.0:
+            # Simulate GNSS corrected Measurements
             # ---------------------------------------
-            # gnss_position_errors, gnss_velocity_errors, gnss_pos_geodetics = compute_ned_errors(gnss_pvt, receiver_state)
+            gnss_corrected_meas, los_info = simulate_gnss_corrected_meas(
+                conf, receiver_state, receiver_ecef, sp3_data, apo_data)
 
-            # [CHALLENGE] output GNSS Position and Position Errors
-            # write_gnss_pos(gnss_pos_file, sod, len(gnss_corrected_meas), gnss_pos_geodetics, gnss_pvt, gnss_position_errors)
+            # [CHALLENGE] Estimate the GNSS-only position
+            # ---------------------------------------
+            # gnss_pvt = estimate_gnss_position_lsq(gnss_corrected_meas)
 
+            if conf['GNSS_OUT']:
+                # output line of sight information
+                write_gnss_los(gnss_los_file, len(
+                    gnss_corrected_meas), los_info)
 
-if conf['GNSS_OUT']:
-    # close out files
+                # [CHALLENGE] Estimate the Position Errors
+                # ---------------------------------------
+                # gnss_position_errors, gnss_velocity_errors, gnss_pos_geodetics = compute_ned_errors(gnss_pvt, receiver_state)
+
+                # [CHALLENGE] output GNSS Position and Position Errors
+                # write_gnss_pos(gnss_pos_file, sod, len(gnss_corrected_meas), gnss_pos_geodetics, gnss_pvt, gnss_position_errors)
+
     gnss_los_file.close()
 
+if conf['GNSS_OUT']:
     # plot LOS outputs
-    plot_gnss_los(gnss_los_file_path)
+    plot_gnss_los(conf['NAV_SOLUTION'], gnss_los_file_path)
 
     # [CHALLENGE] plot GNSS Position and Position Errors
     # plot_gnss_pos(gnss_pos_file_path)
